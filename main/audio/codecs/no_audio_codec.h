@@ -2,10 +2,12 @@
 #define _NO_AUDIO_CODEC_H
 
 #include "audio_codec.h"
+#include "pdm_decimator.h"
 
 #include <driver/gpio.h>
 #include <driver/i2s_pdm.h>
 #include <mutex>
+#include <vector>
 
 class NoAudioCodec : public AudioCodec {
 protected:
@@ -29,6 +31,30 @@ class NoAudioCodecSimplex : public NoAudioCodec {
 public:
     NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_ws, gpio_num_t mic_din);
     NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, i2s_std_slot_mask_t spk_slot_mask, gpio_num_t mic_sck, gpio_num_t mic_ws, gpio_num_t mic_din, i2s_std_slot_mask_t mic_slot_mask);
+};
+
+class NoAudioCodecSimplexOutputOnly : public NoAudioCodec {
+public:
+    NoAudioCodecSimplexOutputOnly(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout);
+
+protected:
+    virtual int Read(int16_t* dest, int samples) override;
+    virtual void EnableInput(bool enable) override;
+};
+
+class NoAudioCodecSimplexRawPdm : public NoAudioCodec {
+public:
+    NoAudioCodecSimplexRawPdm(int input_sample_rate, int output_sample_rate, int pdm_sample_rate,
+        gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_din);
+
+protected:
+    virtual int Read(int16_t* dest, int samples) override;
+
+private:
+    PdmDecimator pdm_decimator_;
+    std::vector<uint8_t> raw_buffer_;
+    std::vector<uint8_t> pending_raw_buffer_;
+    size_t pending_raw_offset_ = 0;
 };
 
 class NoAudioCodecSimplexPdm : public NoAudioCodec {

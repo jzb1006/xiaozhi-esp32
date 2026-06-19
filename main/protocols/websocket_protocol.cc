@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cJSON.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <arpa/inet.h>
 #include "assets/lang_config.h"
 
@@ -28,6 +29,20 @@ bool WebsocketProtocol::Start() {
 bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
     if (websocket_ == nullptr || !websocket_->IsConnected()) {
         return false;
+    }
+
+    static int64_t last_audio_log_us = 0;
+    static int audio_packet_count = 0;
+    static int audio_byte_count = 0;
+    audio_packet_count++;
+    audio_byte_count += packet->payload.size();
+    int64_t now_us = esp_timer_get_time();
+    if (now_us - last_audio_log_us >= 1000000) {
+        ESP_LOGI(TAG, "Sent audio packets: count=%d bytes=%d",
+            audio_packet_count, audio_byte_count);
+        audio_packet_count = 0;
+        audio_byte_count = 0;
+        last_audio_log_us = now_us;
     }
 
     if (version_ == 2) {
@@ -150,6 +165,12 @@ bool WebsocketProtocol::OpenAudioChannel() {
             auto root = cJSON_ParseWithLength(data, len);
             auto type = cJSON_GetObjectItem(root, "type");
             if (cJSON_IsString(type)) {
+                auto state = cJSON_GetObjectItem(root, "state");
+                if (cJSON_IsString(state)) {
+                    ESP_LOGI(TAG, "Received JSON: type=%s state=%s", type->valuestring, state->valuestring);
+                } else {
+                    ESP_LOGI(TAG, "Received JSON: type=%s", type->valuestring);
+                }
                 if (strcmp(type->valuestring, "hello") == 0) {
                     ParseServerHello(root);
                 } else {

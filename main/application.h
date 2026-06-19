@@ -131,6 +131,9 @@ private:
     std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+    esp_timer_handle_t auto_stop_listening_timer_handle_ = nullptr;
+#endif
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
@@ -159,6 +162,10 @@ private:
     void HandleWakeWordDetectedEvent();
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+    void StartAutoStopListeningTimer();
+    void StopAutoStopListeningTimer();
+#endif
 
     // Activation task (runs in background)
     void ActivationTask();

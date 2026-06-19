@@ -3,6 +3,7 @@ set(SOURCES "audio/audio_codec.cc"
             "audio/audio_service.cc"
             "audio/demuxer/ogg_demuxer.cc"
             "audio/codecs/no_audio_codec.cc"
+            "audio/codecs/pdm_decimator.cc"
             "audio/codecs/box_audio_codec.cc"
             "audio/codecs/es8311_audio_codec.cc"
             "audio/codecs/es8374_audio_codec.cc"
@@ -332,6 +333,10 @@ elseif(CONFIG_BOARD_TYPE_WAVESHARE_ESP32_C6_TOUCH_AMOLED_2_06)
     set(BUILTIN_TEXT_FONT font_puhui_basic_30_4)
     set(BUILTIN_ICON_FONT font_awesome_30_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+elseif(CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM)
+    set(BOARD_TYPE "muselab-nanoesp32-c6-pdm")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
+    set(BUILTIN_ICON_FONT font_awesome_14_1)
 elseif(CONFIG_BOARD_TYPE_WAVESHARE_ESP32_C6_TOUCH_AMOLED_2_16)
     set(MANUFACTURER "waveshare")
     set(BOARD_TYPE "esp32-c6-touch-amoled-2.16")

@@ -44,6 +44,25 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+    esp_timer_create_args_t auto_stop_listening_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            app->Schedule([app]() {
+                if (app->GetDeviceState() == kDeviceStateListening) {
+                    ESP_LOGI(TAG, "Auto stopping listening for MuseLab C6");
+                    app->StopListening();
+                }
+            });
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "auto_stop_listen",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&auto_stop_listening_timer_args, &auto_stop_listening_timer_handle_);
+#endif
 }
 
 Application::~Application() {
@@ -496,7 +515,7 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (GetDeviceState() == kDeviceStateSpeaking) {
+        if (GetDeviceState() == kDeviceStateSpeaking && !aborted_) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
@@ -531,11 +550,15 @@ void Application::InitializeProtocol() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+                        SetDeviceState(kDeviceStateIdle);
+#else
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
                         } else {
                             SetDeviceState(kDeviceStateListening);
                         }
+#endif
                     }
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
@@ -869,6 +892,9 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+            StopAutoStopListeningTimer();
+#endif
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
@@ -876,6 +902,9 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableWakeWordDetection(true);
             break;
         case kDeviceStateConnecting:
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+            StopAutoStopListeningTimer();
+#endif
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
@@ -910,8 +939,16 @@ void Application::HandleStateChangedEvent() {
                 play_popup_on_listening_ = false;
                 audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
             }
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+            if (listening_mode_ == kListeningModeAutoStop) {
+                StartAutoStopListeningTimer();
+            }
+#endif
             break;
         case kDeviceStateSpeaking:
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+            StopAutoStopListeningTimer();
+#endif
             display->SetStatus(Lang::Strings::SPEAKING);
 
             if (listening_mode_ != kListeningModeRealtime) {
@@ -922,6 +959,9 @@ void Application::HandleStateChangedEvent() {
             audio_service_.ResetDecoder();
             break;
         case kDeviceStateWifiConfiguring:
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+            StopAutoStopListeningTimer();
+#endif
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(false);
             break;
@@ -930,6 +970,23 @@ void Application::HandleStateChangedEvent() {
             break;
     }
 }
+
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+void Application::StartAutoStopListeningTimer() {
+    if (auto_stop_listening_timer_handle_ == nullptr) {
+        return;
+    }
+    esp_timer_stop(auto_stop_listening_timer_handle_);
+    ESP_ERROR_CHECK(esp_timer_start_once(auto_stop_listening_timer_handle_, 4500 * 1000));
+}
+
+void Application::StopAutoStopListeningTimer() {
+    if (auto_stop_listening_timer_handle_ == nullptr) {
+        return;
+    }
+    esp_timer_stop(auto_stop_listening_timer_handle_);
+}
+#endif
 
 void Application::Schedule(std::function<void()>&& callback) {
     {
@@ -942,6 +999,7 @@ void Application::Schedule(std::function<void()>&& callback) {
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
+    audio_service_.ResetDecoder();
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
     }
@@ -1128,4 +1186,3 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
-
