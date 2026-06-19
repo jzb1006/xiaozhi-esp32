@@ -887,12 +887,12 @@ void Application::FinishServerPlayback() {
         EndServerPlayback();
         return;
     }
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+    audio_service_.WaitForPlaybackQueueEmpty();
+#endif
     EndServerPlayback();
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
     listening_mode_ = kListeningModeAutoStop;
-    if (audio_service_.IsAudioProcessorRunning()) {
-        protocol_->SendStartListening(listening_mode_);
-    }
     SetDeviceState(kDeviceStateListening);
 #else
     if (listening_mode_ == kListeningModeManualStop) {
@@ -981,6 +981,12 @@ void Application::HandleStateChangedEvent() {
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
+                if (play_popup_on_listening_) {
+                    play_popup_on_listening_ = false;
+                    audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+                    audio_service_.WaitForPlaybackQueueEmpty();
+                }
+
                 // For auto mode, wait for playback queue to be empty before enabling voice processing
                 // This prevents audio truncation when STOP arrives late due to network jitter
                 if (listening_mode_ == kListeningModeAutoStop) {
@@ -1002,12 +1008,7 @@ void Application::HandleStateChangedEvent() {
             // Disable wake word detection in listening mode
             audio_service_.EnableWakeWordDetection(false);
 #endif
-            
-            // Play popup sound after ResetDecoder (in EnableVoiceProcessing) has been called
-            if (play_popup_on_listening_) {
-                play_popup_on_listening_ = false;
-                audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
-            }
+
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
             if (listening_mode_ == kListeningModeAutoStop) {
                 StartAutoStopListeningTimer();
@@ -1022,15 +1023,14 @@ void Application::HandleStateChangedEvent() {
 
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
             if (server_playback_kind_.load() == ServerPlaybackKind::kMusic) {
-                // Music frames may already be queued after media.start; keep barge-in without resetting playback.
-                protocol_->SendStartListening(kListeningModeBargeIn);
-                audio_service_.EnableVoiceProcessingForBargeIn();
+                ESP_LOGI(TAG, "C6 speaking: music playback, voice uplink disabled to avoid acoustic loop");
             } else {
                 audio_service_.ResetDecoder();
-                protocol_->SendStartListening(kListeningModeBargeIn);
-                audio_service_.EnableVoiceProcessingForBargeIn();
+                ESP_LOGI(TAG, "C6 speaking: TTS playback, voice uplink disabled to avoid acoustic loop");
             }
-            audio_service_.EnableWakeWordDetection(false);
+            audio_service_.EnableVoiceProcessing(false);
+            audio_service_.EnableWakeWordDetection(true);
+            ESP_LOGI(TAG, "C6 speaking: local wake word interrupt enabled, voice uplink remains disabled");
 #else
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
