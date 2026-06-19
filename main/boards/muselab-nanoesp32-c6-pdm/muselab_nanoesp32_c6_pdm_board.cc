@@ -4,6 +4,7 @@
 #include "button.h"
 #include "config.h"
 #include "led/single_led.h"
+#include "settings.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -65,10 +66,21 @@ private:
 #endif
     }
 
+    void InitializeDefaultVolume() {
+        Settings settings("audio", false);
+        if (settings.HasInt("output_volume")) {
+            return;
+        }
+
+        Settings persist("audio", true);
+        persist.SetInt("output_volume", AUDIO_DEFAULT_VOLUME);
+    }
+
 public:
     MuseLabNanoEsp32C6PdmBoard() :
         boot_button_(BOOT_BUTTON_GPIO) {
         InitializeButtons();
+        InitializeDefaultVolume();
         InitializeAutoStartListening();
         InitializeMicSelfTest();
     }
