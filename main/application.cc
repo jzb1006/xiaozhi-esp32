@@ -909,7 +909,9 @@ void Application::EndServerPlayback() {
 
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     // Check state again in case it was changed during scheduling
-    if (GetDeviceState() != kDeviceStateConnecting) {
+    auto state = GetDeviceState();
+    auto audio_channel_opened = protocol_->IsAudioChannelOpened();
+    if (state != kDeviceStateConnecting && !(state == kDeviceStateIdle && audio_channel_opened)) {
         return;
     }
 
@@ -917,7 +919,7 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
 
-    if (!protocol_->IsAudioChannelOpened()) {
+    if (!audio_channel_opened) {
         if (!protocol_->OpenAudioChannel()) {
             audio_service_.EnableWakeWordDetection(true);
             return;
