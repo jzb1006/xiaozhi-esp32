@@ -551,7 +551,11 @@ void Application::InitializeProtocol() {
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-                        SetDeviceState(kDeviceStateIdle);
+                        listening_mode_ = kListeningModeAutoStop;
+                        if (audio_service_.IsAudioProcessorRunning()) {
+                            protocol_->SendStartListening(listening_mode_);
+                        }
+                        SetDeviceState(kDeviceStateListening);
 #else
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -728,6 +732,12 @@ void Application::HandleToggleChatEvent() {
         SetListeningMode(mode);
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+        if (protocol_) {
+            protocol_->SendStopListening();
+        }
+        SetDeviceState(kDeviceStateIdle);
+#endif
     } else if (state == kDeviceStateListening) {
         protocol_->CloseAudioChannel();
     }
@@ -770,15 +780,19 @@ void Application::HandleStartListeningEvent() {
     }
     
     if (state == kDeviceStateIdle) {
+        ListeningMode mode = kListeningModeManualStop;
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+        mode = GetDefaultListeningMode();
+#endif
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update)
-            Schedule([this]() {
-                ContinueOpenAudioChannel(kListeningModeManualStop);
+            Schedule([this, mode]() {
+                ContinueOpenAudioChannel(mode);
             });
             return;
         }
-        SetListeningMode(kListeningModeManualStop);
+        SetListeningMode(mode);
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
         SetListeningMode(kListeningModeManualStop);
@@ -900,6 +914,9 @@ void Application::HandleStateChangedEvent() {
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+            ESP_LOGI(TAG, "C6 idle: wake word local only, voice uplink disabled");
+#endif
             break;
         case kDeviceStateConnecting:
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
@@ -922,6 +939,9 @@ void Application::HandleStateChangedEvent() {
                 }
                 
                 // Send the start listening command
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+                ESP_LOGI(TAG, "C6 listening: voice uplink enabled, mode=%d", listening_mode_);
+#endif
                 protocol_->SendStartListening(listening_mode_);
                 audio_service_.EnableVoiceProcessing(true);
             }
@@ -951,12 +971,19 @@ void Application::HandleStateChangedEvent() {
 #endif
             display->SetStatus(Lang::Strings::SPEAKING);
 
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+            audio_service_.ResetDecoder();
+            protocol_->SendStartListening(kListeningModeBargeIn);
+            audio_service_.EnableVoiceProcessingForBargeIn();
+            audio_service_.EnableWakeWordDetection(false);
+#else
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 // Only AFE wake word can be detected in speaking mode
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();
+#endif
             break;
         case kDeviceStateWifiConfiguring:
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM

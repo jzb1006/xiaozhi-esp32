@@ -122,6 +122,7 @@ public:
 
     void EnableWakeWordDetection(bool enable);
     void EnableVoiceProcessing(bool enable);
+    void EnableVoiceProcessingForBargeIn();
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
 
@@ -187,6 +188,7 @@ private:
     void AudioInputTask();
     void AudioOutputTask();
     void OpusCodecTask();
+    void StartVoiceProcessing(bool reset_decoder);
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
