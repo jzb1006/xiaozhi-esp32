@@ -11,6 +11,7 @@
 #include <deque>
 #include <memory>
 #include <functional>
+#include <atomic>
 
 #include "protocol.h"
 #include "ota.h"
@@ -122,6 +123,12 @@ public:
     void ResetProtocol();
 
 private:
+    enum class ServerPlaybackKind {
+        kNone,
+        kTts,
+        kMusic,
+    };
+
     Application();
     ~Application();
 
@@ -143,7 +150,8 @@ private:
     std::function<void(const std::string&)> mcp_broadcast_callback_;
 
     bool has_server_time_ = false;
-    bool aborted_ = false;
+    std::atomic<ServerPlaybackKind> server_playback_kind_{ServerPlaybackKind::kNone};
+    std::atomic<bool> aborted_{false};
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     int clock_ticks_ = 0;
@@ -159,7 +167,10 @@ private:
     void HandleNetworkDisconnectedEvent();
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
+    bool CanAcceptServerAudio() const;
+    bool PrepareServerPlayback(ServerPlaybackKind kind);
     void FinishServerPlayback();
+    void EndServerPlayback();
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM

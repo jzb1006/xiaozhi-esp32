@@ -204,6 +204,7 @@ void Application::Run() {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
+            EndServerPlayback();
             SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
         }
@@ -511,7 +512,7 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (GetDeviceState() == kDeviceStateSpeaking && !aborted_) {
+        if (CanAcceptServerAudio()) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
@@ -529,6 +530,7 @@ void Application::InitializeProtocol() {
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
+            EndServerPlayback();
             SetDeviceState(kDeviceStateIdle);
         });
     });
@@ -539,8 +541,10 @@ void Application::InitializeProtocol() {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
+                if (!PrepareServerPlayback(ServerPlaybackKind::kTts)) {
+                    return;
+                }
                 Schedule([this]() {
-                    aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
@@ -581,8 +585,10 @@ void Application::InitializeProtocol() {
                 return;
             }
             if (control.start) {
+                if (!PrepareServerPlayback(ServerPlaybackKind::kMusic)) {
+                    return;
+                }
                 Schedule([this]() {
-                    aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (control.stop) {
@@ -856,10 +862,32 @@ void Application::HandleWakeWordDetectedEvent() {
     }
 }
 
+bool Application::CanAcceptServerAudio() const {
+    return !aborted_.load()
+        && (GetDeviceState() == kDeviceStateSpeaking
+            || server_playback_kind_.load() == ServerPlaybackKind::kMusic);
+}
+
+bool Application::PrepareServerPlayback(ServerPlaybackKind kind) {
+    auto state = GetDeviceState();
+    if (state != kDeviceStateIdle && state != kDeviceStateListening && state != kDeviceStateSpeaking) {
+        ESP_LOGW(TAG, "Ignoring server playback start in state %d", (int)state);
+        return false;
+    }
+    if (kind == ServerPlaybackKind::kMusic) {
+        audio_service_.ResetDecoder();
+    }
+    aborted_.store(false);
+    server_playback_kind_.store(kind);
+    return true;
+}
+
 void Application::FinishServerPlayback() {
     if (GetDeviceState() != kDeviceStateSpeaking) {
+        EndServerPlayback();
         return;
     }
+    EndServerPlayback();
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
     listening_mode_ = kListeningModeAutoStop;
     if (audio_service_.IsAudioProcessorRunning()) {
@@ -873,6 +901,10 @@ void Application::FinishServerPlayback() {
         SetDeviceState(kDeviceStateListening);
     }
 #endif
+}
+
+void Application::EndServerPlayback() {
+    server_playback_kind_.store(ServerPlaybackKind::kNone);
 }
 
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
@@ -987,9 +1019,15 @@ void Application::HandleStateChangedEvent() {
             display->SetStatus(Lang::Strings::SPEAKING);
 
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-            audio_service_.ResetDecoder();
-            protocol_->SendStartListening(kListeningModeBargeIn);
-            audio_service_.EnableVoiceProcessingForBargeIn();
+            if (server_playback_kind_.load() == ServerPlaybackKind::kMusic) {
+                // Music frames may already be queued after media.start; keep barge-in without resetting playback.
+                protocol_->SendStartListening(kListeningModeBargeIn);
+                audio_service_.EnableVoiceProcessingForBargeIn();
+            } else {
+                audio_service_.ResetDecoder();
+                protocol_->SendStartListening(kListeningModeBargeIn);
+                audio_service_.EnableVoiceProcessingForBargeIn();
+            }
             audio_service_.EnableWakeWordDetection(false);
 #else
             if (listening_mode_ != kListeningModeRealtime) {
@@ -997,7 +1035,9 @@ void Application::HandleStateChangedEvent() {
                 // Only AFE wake word can be detected in speaking mode
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
-            audio_service_.ResetDecoder();
+            if (server_playback_kind_.load() != ServerPlaybackKind::kMusic) {
+                audio_service_.ResetDecoder();
+            }
 #endif
             break;
         case kDeviceStateWifiConfiguring:
@@ -1040,7 +1080,8 @@ void Application::Schedule(std::function<void()>&& callback) {
 
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
-    aborted_ = true;
+    aborted_.store(true);
+    EndServerPlayback();
     audio_service_.ResetDecoder();
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
