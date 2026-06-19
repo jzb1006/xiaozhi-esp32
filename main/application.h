@@ -30,7 +30,6 @@
 #define MAIN_EVENT_NETWORK_DISCONNECTED (1 << 8)
 #define MAIN_EVENT_TOGGLE_CHAT          (1 << 9)
 #define MAIN_EVENT_START_LISTENING      (1 << 10)
-#define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
 
 
@@ -100,9 +99,9 @@ public:
 
     /**
      * Stop listening (event-based, thread-safe)
-     * Sends MAIN_EVENT_STOP_LISTENING to be handled in Run()
+     * Schedules stop handling in the main task.
      */
-    void StopListening();
+    void StopListening(ListenStopReason reason = kListenStopReasonManual);
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
@@ -155,11 +154,12 @@ private:
     void HandleStateChangedEvent();
     void HandleToggleChatEvent();
     void HandleStartListeningEvent();
-    void HandleStopListeningEvent();
+    void HandleStopListeningEvent(ListenStopReason reason = kListenStopReasonManual);
     void HandleNetworkConnectedEvent();
     void HandleNetworkDisconnectedEvent();
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
+    void FinishServerPlayback();
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM

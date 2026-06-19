@@ -67,9 +67,14 @@ void Protocol::SendStartListening(ListeningMode mode) {
     SendText(message);
 }
 
-void Protocol::SendStopListening() {
-    ESP_LOGI(TAG, "Send listen stop");
-    std::string message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"listen\",\"state\":\"stop\"}";
+void Protocol::SendStopListening(ListenStopReason reason) {
+    const char* reason_text = reason == kListenStopReasonTimeout ? "timeout" :
+        reason == kListenStopReasonBargeIn ? "barge_in" : "manual";
+    ESP_LOGI(TAG, "Send listen stop, reason=%s", reason_text);
+    std::string message = "{\"session_id\":\"" + session_id_ + "\"";
+    message += ",\"type\":\"listen\",\"state\":\"stop\",\"reason\":\"";
+    message += reason_text;
+    message += "\"}";
     SendText(message);
 }
 

@@ -9,6 +9,7 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "media_control.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -52,7 +53,7 @@ Application::Application() {
             app->Schedule([app]() {
                 if (app->GetDeviceState() == kDeviceStateListening) {
                     ESP_LOGI(TAG, "Auto stopping listening for MuseLab C6");
-                    app->StopListening();
+                    app->HandleStopListeningEvent(kListenStopReasonTimeout);
                 }
             });
         },
@@ -196,7 +197,6 @@ void Application::Run() {
         MAIN_EVENT_NETWORK_DISCONNECTED |
         MAIN_EVENT_TOGGLE_CHAT |
         MAIN_EVENT_START_LISTENING |
-        MAIN_EVENT_STOP_LISTENING |
         MAIN_EVENT_ACTIVATION_DONE |
         MAIN_EVENT_STATE_CHANGED;
 
@@ -230,10 +230,6 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_START_LISTENING) {
             HandleStartListeningEvent();
-        }
-
-        if (bits & MAIN_EVENT_STOP_LISTENING) {
-            HandleStopListeningEvent();
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
@@ -548,23 +544,7 @@ void Application::InitializeProtocol() {
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
-                Schedule([this]() {
-                    if (GetDeviceState() == kDeviceStateSpeaking) {
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-                        listening_mode_ = kListeningModeAutoStop;
-                        if (audio_service_.IsAudioProcessorRunning()) {
-                            protocol_->SendStartListening(listening_mode_);
-                        }
-                        SetDeviceState(kDeviceStateListening);
-#else
-                        if (listening_mode_ == kListeningModeManualStop) {
-                            SetDeviceState(kDeviceStateIdle);
-                        } else {
-                            SetDeviceState(kDeviceStateListening);
-                        }
-#endif
-                    }
-                });
+                Schedule([this]() { FinishServerPlayback(); });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
@@ -593,6 +573,20 @@ void Application::InitializeProtocol() {
             auto payload = cJSON_GetObjectItem(root, "payload");
             if (cJSON_IsObject(payload)) {
                 McpServer::GetInstance().ParseMessage(payload);
+            }
+        } else if (strcmp(type->valuestring, "media") == 0) {
+            auto control = ParseMediaControl(root);
+            if (!control.valid) {
+                ESP_LOGW(TAG, "Unsupported media control");
+                return;
+            }
+            if (control.start) {
+                Schedule([this]() {
+                    aborted_ = false;
+                    SetDeviceState(kDeviceStateSpeaking);
+                });
+            } else if (control.stop) {
+                Schedule([this]() { FinishServerPlayback(); });
             }
         } else if (strcmp(type->valuestring, "system") == 0) {
             auto command = cJSON_GetObjectItem(root, "command");
@@ -694,8 +688,10 @@ void Application::StartListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
 }
 
-void Application::StopListening() {
-    xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING);
+void Application::StopListening(ListenStopReason reason) {
+    Schedule([this, reason]() {
+        HandleStopListeningEvent(reason);
+    });
 }
 
 void Application::HandleToggleChatEvent() {
@@ -799,7 +795,7 @@ void Application::HandleStartListeningEvent() {
     }
 }
 
-void Application::HandleStopListeningEvent() {
+void Application::HandleStopListeningEvent(ListenStopReason reason) {
     auto state = GetDeviceState();
     
     if (state == kDeviceStateAudioTesting) {
@@ -808,7 +804,7 @@ void Application::HandleStopListeningEvent() {
         return;
     } else if (state == kDeviceStateListening) {
         if (protocol_) {
-            protocol_->SendStopListening();
+            protocol_->SendStopListening(reason);
         }
         SetDeviceState(kDeviceStateIdle);
     }
@@ -858,6 +854,25 @@ void Application::HandleWakeWordDetectedEvent() {
         // Restart the activation check if the wake word is detected during activation
         SetDeviceState(kDeviceStateIdle);
     }
+}
+
+void Application::FinishServerPlayback() {
+    if (GetDeviceState() != kDeviceStateSpeaking) {
+        return;
+    }
+#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+    listening_mode_ = kListeningModeAutoStop;
+    if (audio_service_.IsAudioProcessorRunning()) {
+        protocol_->SendStartListening(listening_mode_);
+    }
+    SetDeviceState(kDeviceStateListening);
+#else
+    if (listening_mode_ == kListeningModeManualStop) {
+        SetDeviceState(kDeviceStateIdle);
+    } else {
+        SetDeviceState(kDeviceStateListening);
+    }
+#endif
 }
 
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
