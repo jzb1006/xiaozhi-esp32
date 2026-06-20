@@ -270,6 +270,10 @@ void Application::Run() {
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
             }
+
+            if (clock_ticks_ % 30 == 0) {
+                EnsurePushChannelOpen();
+            }
         }
     }
 }
@@ -292,6 +296,10 @@ void Application::HandleNetworkConnectedEvent() {
             app->activation_task_handle_ = nullptr;
             vTaskDelete(NULL);
         }, "activation", 4096 * 2, this, 2, &activation_task_handle_);
+    } else if (state == kDeviceStateIdle) {
+        Schedule([this]() {
+            EnsurePushChannelOpen();
+        });
     }
 
     // Update the status bar immediately to show the network state
@@ -333,6 +341,7 @@ void Application::HandleActivationDoneEvent() {
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+        EnsurePushChannelOpen();
     });
 }
 
@@ -762,6 +771,22 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
     }
 
     SetListeningMode(mode);
+}
+
+void Application::EnsurePushChannelOpen() {
+    if (!protocol_ || GetDeviceState() != kDeviceStateIdle) {
+        return;
+    }
+
+    if (protocol_->IsAudioChannelOpened()) {
+        protocol_->KeepAlive();
+        return;
+    }
+
+    ESP_LOGI(TAG, "Opening idle push channel");
+    if (protocol_->OpenAudioChannel(false)) {
+        protocol_->KeepAlive();
+    }
 }
 
 void Application::HandleStartListeningEvent() {

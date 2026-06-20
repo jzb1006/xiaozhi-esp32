@@ -32,6 +32,9 @@ void Protocol::OnDisconnected(std::function<void()> callback) {
     on_disconnected_ = callback;
 }
 
+void Protocol::KeepAlive() {
+}
+
 void Protocol::SetError(const std::string& message) {
     error_occurred_ = true;
     if (on_network_error_ != nullptr) {

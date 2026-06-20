@@ -71,10 +71,11 @@ public:
     void OnDisconnected(std::function<void()> callback);
 
     virtual bool Start() = 0;
-    virtual bool OpenAudioChannel() = 0;
+    virtual bool OpenAudioChannel(bool report_error = true) = 0;
     virtual void CloseAudioChannel(bool send_goodbye = true) = 0;
     virtual bool IsAudioChannelOpened() const = 0;
     virtual bool SendAudio(std::unique_ptr<AudioStreamPacket> packet) = 0;
+    virtual void KeepAlive();
     virtual void SendWakeWordDetected(const std::string& wake_word);
     virtual void SendStartListening(ListeningMode mode);
     virtual void SendStopListening(ListenStopReason reason = kListenStopReasonManual);

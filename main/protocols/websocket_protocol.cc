@@ -87,7 +87,13 @@ bool WebsocketProtocol::SendText(const std::string& text) {
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
-    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
+    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_;
+}
+
+void WebsocketProtocol::KeepAlive() {
+    if (websocket_ != nullptr && websocket_->IsConnected()) {
+        websocket_->Ping();
+    }
 }
 
 void WebsocketProtocol::CloseAudioChannel(bool send_goodbye) {
@@ -95,7 +101,7 @@ void WebsocketProtocol::CloseAudioChannel(bool send_goodbye) {
     websocket_.reset();
 }
 
-bool WebsocketProtocol::OpenAudioChannel() {
+bool WebsocketProtocol::OpenAudioChannel(bool report_error) {
     Settings settings("websocket", false);
     std::string url = settings.GetString("url");
     std::string token = settings.GetString("token");
@@ -112,6 +118,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
         ESP_LOGE(TAG, "Failed to create websocket");
         return false;
     }
+
+    auto close_failed_connection = [this]() {
+        websocket_.reset();
+    };
 
     if (!token.empty()) {
         // If token not has a space, add "Bearer " prefix
@@ -196,13 +206,17 @@ bool WebsocketProtocol::OpenAudioChannel() {
     ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
     if (!websocket_->Connect(url.c_str())) {
         ESP_LOGE(TAG, "Failed to connect to websocket server, code=%d", websocket_->GetLastError());
-        SetError(Lang::Strings::SERVER_NOT_CONNECTED);
+        if (report_error) {
+            SetError(Lang::Strings::SERVER_NOT_CONNECTED);
+        }
+        close_failed_connection();
         return false;
     }
 
     // Send hello message to describe the client
     auto message = GetHelloMessage();
     if (!SendText(message)) {
+        close_failed_connection();
         return false;
     }
 
@@ -210,7 +224,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(10000));
     if (!(bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT)) {
         ESP_LOGE(TAG, "Failed to receive server hello");
-        SetError(Lang::Strings::SERVER_TIMEOUT);
+        if (report_error) {
+            SetError(Lang::Strings::SERVER_TIMEOUT);
+        }
+        close_failed_connection();
         return false;
     }
 

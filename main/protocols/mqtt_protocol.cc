@@ -212,10 +212,10 @@ void MqttProtocol::CloseAudioChannel(bool send_goodbye) {
     }
 }
 
-bool MqttProtocol::OpenAudioChannel() {
+bool MqttProtocol::OpenAudioChannel(bool report_error) {
     if (mqtt_ == nullptr || !mqtt_->IsConnected()) {
         ESP_LOGI(TAG, "MQTT is not connected, try to connect now");
-        if (!StartMqttClient(true)) {
+        if (!StartMqttClient(report_error)) {
             return false;
         }
     }
@@ -233,7 +233,9 @@ bool MqttProtocol::OpenAudioChannel() {
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, MQTT_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(10000));
     if (!(bits & MQTT_PROTOCOL_SERVER_HELLO_EVENT)) {
         ESP_LOGE(TAG, "Failed to receive server hello");
-        SetError(Lang::Strings::SERVER_TIMEOUT);
+        if (report_error) {
+            SetError(Lang::Strings::SERVER_TIMEOUT);
+        }
         return false;
     }
 

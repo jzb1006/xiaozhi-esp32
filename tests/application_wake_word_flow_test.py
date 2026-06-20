@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APPLICATION_CC = ROOT / "main" / "application.cc"
+WEBSOCKET_PROTOCOL_CC = ROOT / "main" / "protocols" / "websocket_protocol.cc"
 
 
 def extract_function_body(source: str, signature: str) -> str:
@@ -38,5 +39,48 @@ def test_continue_wake_word_invoke_accepts_reused_open_channel():
     assert "state == kDeviceStateIdle && audio_channel_opened" in body
 
 
+def test_activation_done_opens_push_channel_without_listening():
+    source = APPLICATION_CC.read_text()
+    body = extract_function_body(
+        source,
+        "void Application::HandleActivationDoneEvent()",
+    )
+
+    assert "EnsurePushChannelOpen()" in body
+
+    push_body = extract_function_body(
+        source,
+        "void Application::EnsurePushChannelOpen()",
+    )
+    assert "protocol_->OpenAudioChannel(false)" in push_body
+    assert "protocol_->KeepAlive()" in push_body
+    assert "SetListeningMode" not in push_body
+    assert "SendStartListening" not in push_body
+
+
+def test_websocket_open_check_does_not_expire_idle_push_channel():
+    source = WEBSOCKET_PROTOCOL_CC.read_text()
+    body = extract_function_body(
+        source,
+        "bool WebsocketProtocol::IsAudioChannelOpened() const",
+    )
+
+    assert "websocket_->IsConnected()" in body
+    assert "IsTimeout()" not in body
+
+
+def test_websocket_open_failure_drops_half_open_connection():
+    source = WEBSOCKET_PROTOCOL_CC.read_text()
+    body = extract_function_body(
+        source,
+        "bool WebsocketProtocol::OpenAudioChannel(bool report_error)",
+    )
+
+    assert "websocket_.reset()" in body
+
+
 if __name__ == "__main__":
     test_continue_wake_word_invoke_accepts_reused_open_channel()
+    test_activation_done_opens_push_channel_without_listening()
+    test_websocket_open_check_does_not_expire_idle_push_channel()
+    test_websocket_open_failure_drops_half_open_connection()

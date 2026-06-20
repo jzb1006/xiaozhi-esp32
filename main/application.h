@@ -172,6 +172,7 @@ private:
     void FinishServerPlayback();
     void EndServerPlayback();
     void ContinueOpenAudioChannel(ListeningMode mode);
+    void EnsurePushChannelOpen();
     void ContinueWakeWordInvoke(const std::string& wake_word);
 #if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
     void StartAutoStopListeningTimer();
