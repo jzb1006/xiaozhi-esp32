@@ -46,13 +46,13 @@ Application::Application() {
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
 
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+#if ENABLE_LOCAL_AUTO_STOP_LISTENING
     esp_timer_create_args_t auto_stop_listening_timer_args = {
         .callback = [](void* arg) {
             Application* app = (Application*)arg;
             app->Schedule([app]() {
                 if (app->GetDeviceState() == kDeviceStateListening) {
-                    ESP_LOGI(TAG, "Auto stopping listening for MuseLab C6");
+                    ESP_LOGI(TAG, "Auto stopping listening for %s", BOARD_NAME);
                     app->HandleStopListeningEvent(kListenStopReasonTimeout);
                 }
             });
@@ -959,6 +959,7 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     }
     // Set the chat state to wake word detected
     protocol_->SendWakeWordDetected(wake_word);
+    play_popup_on_listening_ = true;
     SetListeningMode(GetDefaultListeningMode());
 #else
     // Set flag to play popup sound after state changes to listening
@@ -980,7 +981,7 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+#if ENABLE_LOCAL_AUTO_STOP_LISTENING
             StopAutoStopListeningTimer();
 #endif
             display->SetStatus(Lang::Strings::STANDBY);
@@ -993,7 +994,7 @@ void Application::HandleStateChangedEvent() {
 #endif
             break;
         case kDeviceStateConnecting:
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+#if ENABLE_LOCAL_AUTO_STOP_LISTENING
             StopAutoStopListeningTimer();
 #endif
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -1034,14 +1035,14 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableWakeWordDetection(false);
 #endif
 
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+#if ENABLE_LOCAL_AUTO_STOP_LISTENING
             if (listening_mode_ == kListeningModeAutoStop) {
                 StartAutoStopListeningTimer();
             }
 #endif
             break;
         case kDeviceStateSpeaking:
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+#if ENABLE_LOCAL_AUTO_STOP_LISTENING
             StopAutoStopListeningTimer();
 #endif
             display->SetStatus(Lang::Strings::SPEAKING);
@@ -1068,7 +1069,7 @@ void Application::HandleStateChangedEvent() {
 #endif
             break;
         case kDeviceStateWifiConfiguring:
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+#if ENABLE_LOCAL_AUTO_STOP_LISTENING
             StopAutoStopListeningTimer();
 #endif
             audio_service_.EnableVoiceProcessing(false);
@@ -1080,7 +1081,7 @@ void Application::HandleStateChangedEvent() {
     }
 }
 
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
+#if ENABLE_LOCAL_AUTO_STOP_LISTENING
 void Application::StartAutoStopListeningTimer() {
     if (auto_stop_listening_timer_handle_ == nullptr) {
         return;

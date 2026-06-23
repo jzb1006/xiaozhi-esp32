@@ -158,8 +158,7 @@ public:
         touch_button_(TOUCH_BUTTON_GPIO),
         volume_up_button_(VOLUME_UP_BUTTON_GPIO),
         volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
-        InitializeDisplayI2c();
-        InitializeSsd1306Display();
+        display_ = new NoDisplay();
         InitializeButtons();
         InitializeTools();
     }
