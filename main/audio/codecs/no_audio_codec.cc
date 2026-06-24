@@ -2,7 +2,7 @@
 
 #include <esp_log.h>
 #include <esp_timer.h>
-#include <algorithm>
+#include <driver/i2s_pdm.h>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -283,189 +283,6 @@ void NoAudioCodecSimplexOutputOnly::EnableInput(bool enable) {
     AudioCodec::EnableInput(enable);
 }
 
-NoAudioCodecSimplexRawPdm::NoAudioCodecSimplexRawPdm(int input_sample_rate, int output_sample_rate, int pdm_sample_rate,
-        gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_din)
-    : pdm_decimator_(pdm_sample_rate / input_sample_rate) {
-    duplex_ = true;
-    input_sample_rate_ = input_sample_rate;
-    output_sample_rate_ = output_sample_rate;
-
-    i2s_chan_config_t chan_cfg = {
-        .id = I2S_NUM_AUTO,
-        .role = I2S_ROLE_MASTER,
-        .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
-        .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
-        .auto_clear_after_cb = true,
-        .auto_clear_before_cb = false,
-        .intr_priority = 0,
-    };
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, &rx_handle_));
-
-    i2s_std_config_t tx_std_cfg = {
-        .clk_cfg = {
-            .sample_rate_hz = (uint32_t)output_sample_rate_,
-            .clk_src = I2S_CLK_SRC_DEFAULT,
-            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-            #ifdef   I2S_HW_VERSION_2
-                .ext_clk_freq_hz = 0,
-            #endif
-
-        },
-        .slot_cfg = {
-            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
-            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
-            .slot_mode = I2S_SLOT_MODE_MONO,
-            .slot_mask = I2S_STD_SLOT_LEFT,
-            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
-            .ws_pol = false,
-            .bit_shift = true,
-            #ifdef   I2S_HW_VERSION_2
-                .left_align = true,
-                .big_endian = false,
-                .bit_order_lsb = false
-            #endif
-
-        },
-        .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = spk_bclk,
-            .ws = spk_ws,
-            .dout = spk_dout,
-            .din = I2S_GPIO_UNUSED,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv = false
-            }
-        }
-    };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &tx_std_cfg));
-
-#if SOC_I2S_SUPPORTS_PDM_RX
-    i2s_pdm_rx_config_t pdm_rx_cfg = {
-        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG((uint32_t)pdm_sample_rate),
-        .slot_cfg = I2S_PDM_RX_SLOT_RAW_FMT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
-        .gpio_cfg = {
-            .clk = mic_sck,
-            .din = mic_din,
-
-            .invert_flags = {
-                .clk_inv = false,
-            },
-        },
-    };
-    ESP_ERROR_CHECK(i2s_channel_init_pdm_rx_mode(rx_handle_, &pdm_rx_cfg));
-#else
-    ESP_LOGE(TAG, "PDM RX is not supported");
-#endif
-
-    raw_buffer_.resize(AUDIO_CODEC_DMA_FRAME_NUM * sizeof(int16_t));
-    pending_raw_buffer_.reserve(raw_buffer_.size());
-    ESP_LOGI(TAG, "Simplex raw PDM channels created, pdm_sample_rate=%d", pdm_sample_rate);
-}
-
-int NoAudioCodecSimplexRawPdm::Read(int16_t* dest, int samples) {
-    size_t bytes_read = 0;
-    constexpr uint32_t kReadTimeoutMs = 200;
-    int produced = 0;
-
-    while (produced < samples) {
-        const uint8_t* raw_data = nullptr;
-        size_t raw_size = 0;
-        bool using_pending = pending_raw_offset_ < pending_raw_buffer_.size();
-
-        if (using_pending) {
-            raw_data = pending_raw_buffer_.data() + pending_raw_offset_;
-            raw_size = pending_raw_buffer_.size() - pending_raw_offset_;
-        } else {
-            pending_raw_buffer_.clear();
-            pending_raw_offset_ = 0;
-            if (i2s_channel_read(rx_handle_, raw_buffer_.data(), raw_buffer_.size(), &bytes_read, kReadTimeoutMs) != ESP_OK || bytes_read == 0) {
-                return produced;
-            }
-            raw_data = raw_buffer_.data();
-            raw_size = bytes_read;
-        }
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-        static int64_t last_raw_stats_us = 0;
-        int64_t raw_now_us = esp_timer_get_time();
-        if (!using_pending && raw_now_us - last_raw_stats_us >= 1000000) {
-            int ones = 0;
-            int zeros = 0;
-            int bytes_00 = 0;
-            int bytes_ff = 0;
-            int words_0000 = 0;
-            int words_ffff = 0;
-            int words = 0;
-            for (size_t i = 0; i < raw_size; i++) {
-                uint8_t byte = raw_data[i];
-                ones += __builtin_popcount((unsigned)byte);
-                zeros += 8 - __builtin_popcount((unsigned)byte);
-                bytes_00 += byte == 0x00;
-                bytes_ff += byte == 0xff;
-            }
-            for (size_t i = 0; i + 1 < raw_size; i += 2) {
-                uint16_t word = raw_data[i] | ((uint16_t)raw_data[i + 1] << 8);
-                words_0000 += word == 0x0000;
-                words_ffff += word == 0xffff;
-                words++;
-            }
-            ESP_LOGI(TAG, "Raw PDM bytes: bytes=%u ones=%d zeros=%d density=%d/1000 00=%d ff=%d 0000=%d ffff=%d/%d first=%02x %02x %02x %02x",
-                     (unsigned)raw_size, ones, zeros, ones * 1000 / (ones + zeros),
-                     bytes_00, bytes_ff, words_0000, words_ffff, words,
-                     raw_size > 0 ? raw_data[0] : 0,
-                     raw_size > 1 ? raw_data[1] : 0,
-                     raw_size > 2 ? raw_data[2] : 0,
-                     raw_size > 3 ? raw_data[3] : 0);
-            last_raw_stats_us = raw_now_us;
-        }
-#endif
-        size_t consumed = 0;
-        produced += pdm_decimator_.Process(raw_data, raw_size, dest + produced, samples - produced, &consumed);
-        if (using_pending) {
-            pending_raw_offset_ += consumed;
-            if (pending_raw_offset_ >= pending_raw_buffer_.size()) {
-                pending_raw_buffer_.clear();
-                pending_raw_offset_ = 0;
-            }
-        } else if (consumed < raw_size) {
-            pending_raw_buffer_.assign(raw_data + consumed, raw_data + raw_size);
-            pending_raw_offset_ = 0;
-        }
-    }
-
-    if (input_gain_ > 0) {
-        for (int i = 0; i < produced; i++) {
-            int32_t amplified = (int32_t)std::lround(dest[i] * input_gain_);
-            dest[i] = (amplified > INT16_MAX) ? INT16_MAX : (amplified < -INT16_MAX) ? -INT16_MAX : (int16_t)amplified;
-        }
-    }
-
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-    static int64_t last_stats_us = 0;
-    int64_t now_us = esp_timer_get_time();
-    if (produced > 0 && now_us - last_stats_us >= 1000000) {
-        int16_t min_sample = INT16_MAX;
-        int16_t max_sample = INT16_MIN;
-        int64_t sum = 0;
-        int64_t sum_squares = 0;
-        for (int i = 0; i < produced; i++) {
-            int16_t sample = dest[i];
-            min_sample = std::min(min_sample, sample);
-            max_sample = std::max(max_sample, sample);
-            sum += sample;
-            sum_squares += (int32_t)sample * sample;
-        }
-        int mean = (int)(sum / produced);
-        int rms = (int)std::sqrt((double)sum_squares / produced);
-        ESP_LOGI(TAG, "Raw PDM PCM stats: samples=%d min=%d max=%d mean=%d rms=%d",
-                 produced, min_sample, max_sample, mean, rms);
-        last_stats_us = now_us;
-    }
-#endif
-    return produced;
-}
-
 int NoAudioCodec::Write(const int16_t* data, int samples) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     std::vector<int32_t> buffer(samples);
@@ -500,35 +317,9 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
 
     samples = bytes_read / sizeof(int32_t);
     for (int i = 0; i < samples; i++) {
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-        int32_t value = bit32_buffer[i] >> 16;
-#else
         int32_t value = bit32_buffer[i] >> 12;
-#endif
         dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
     }
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-    static int64_t last_stats_us = 0;
-    int64_t now_us = esp_timer_get_time();
-    if (samples > 0 && now_us - last_stats_us >= 1000000) {
-        int16_t min_sample = INT16_MAX;
-        int16_t max_sample = INT16_MIN;
-        int64_t sum = 0;
-        int64_t sum_squares = 0;
-        for (int i = 0; i < samples; i++) {
-            int16_t sample = dest[i];
-            min_sample = std::min(min_sample, sample);
-            max_sample = std::max(max_sample, sample);
-            sum += sample;
-            sum_squares += (int32_t)sample * sample;
-        }
-        int mean = (int)(sum / samples);
-        int rms = (int)std::sqrt((double)sum_squares / samples);
-        ESP_LOGI(TAG, "I2S MIC PCM stats: samples=%d min=%d max=%d mean=%d rms=%d",
-                 samples, min_sample, max_sample, mean, rms);
-        last_stats_us = now_us;
-    }
-#endif
     return samples;
 }
 

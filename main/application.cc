@@ -46,24 +46,6 @@ Application::Application() {
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
 
-#if ENABLE_LOCAL_AUTO_STOP_LISTENING
-    esp_timer_create_args_t auto_stop_listening_timer_args = {
-        .callback = [](void* arg) {
-            Application* app = (Application*)arg;
-            app->Schedule([app]() {
-                if (app->GetDeviceState() == kDeviceStateListening) {
-                    ESP_LOGI(TAG, "Auto stopping listening for %s", BOARD_NAME);
-                    app->HandleStopListeningEvent(kListenStopReasonTimeout);
-                }
-            });
-        },
-        .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "auto_stop_listen",
-        .skip_unhandled_events = true,
-    };
-    esp_timer_create(&auto_stop_listening_timer_args, &auto_stop_listening_timer_handle_);
-#endif
 }
 
 Application::~Application() {
@@ -743,12 +725,6 @@ void Application::HandleToggleChatEvent() {
         SetListeningMode(mode);
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-        if (protocol_) {
-            protocol_->SendStopListening();
-        }
-        SetDeviceState(kDeviceStateIdle);
-#endif
     } else if (state == kDeviceStateListening) {
         protocol_->CloseAudioChannel();
     }
@@ -808,9 +784,6 @@ void Application::HandleStartListeningEvent() {
     
     if (state == kDeviceStateIdle) {
         ListeningMode mode = kListeningModeManualStop;
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-        mode = GetDefaultListeningMode();
-#endif
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update)
@@ -912,20 +885,12 @@ void Application::FinishServerPlayback() {
         EndServerPlayback();
         return;
     }
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-    audio_service_.WaitForPlaybackQueueEmpty();
-#endif
     EndServerPlayback();
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-    listening_mode_ = kListeningModeAutoStop;
-    SetDeviceState(kDeviceStateListening);
-#else
     if (listening_mode_ == kListeningModeManualStop) {
         SetDeviceState(kDeviceStateIdle);
     } else {
         SetDeviceState(kDeviceStateListening);
     }
-#endif
 }
 
 void Application::EndServerPlayback() {
@@ -981,22 +946,13 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
-#if ENABLE_LOCAL_AUTO_STOP_LISTENING
-            StopAutoStopListeningTimer();
-#endif
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-            ESP_LOGI(TAG, "C6 idle: wake word local only, voice uplink disabled");
-#endif
             break;
         case kDeviceStateConnecting:
-#if ENABLE_LOCAL_AUTO_STOP_LISTENING
-            StopAutoStopListeningTimer();
-#endif
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
@@ -1020,9 +976,6 @@ void Application::HandleStateChangedEvent() {
                 }
                 
                 // Send the start listening command
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-                ESP_LOGI(TAG, "C6 listening: voice uplink enabled, mode=%d", listening_mode_);
-#endif
                 protocol_->SendStartListening(listening_mode_);
                 audio_service_.EnableVoiceProcessing(true);
             }
@@ -1035,29 +988,10 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableWakeWordDetection(false);
 #endif
 
-#if ENABLE_LOCAL_AUTO_STOP_LISTENING
-            if (listening_mode_ == kListeningModeAutoStop) {
-                StartAutoStopListeningTimer();
-            }
-#endif
             break;
         case kDeviceStateSpeaking:
-#if ENABLE_LOCAL_AUTO_STOP_LISTENING
-            StopAutoStopListeningTimer();
-#endif
             display->SetStatus(Lang::Strings::SPEAKING);
 
-#if CONFIG_BOARD_TYPE_MUSELAB_NANOESP32_C6_PDM
-            if (server_playback_kind_.load() == ServerPlaybackKind::kMusic) {
-                ESP_LOGI(TAG, "C6 speaking: music playback, voice uplink disabled to avoid acoustic loop");
-            } else {
-                audio_service_.ResetDecoder();
-                ESP_LOGI(TAG, "C6 speaking: TTS playback, voice uplink disabled to avoid acoustic loop");
-            }
-            audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(true);
-            ESP_LOGI(TAG, "C6 speaking: local wake word interrupt enabled, voice uplink remains disabled");
-#else
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
                 // Only AFE wake word can be detected in speaking mode
@@ -1066,12 +1000,8 @@ void Application::HandleStateChangedEvent() {
             if (server_playback_kind_.load() != ServerPlaybackKind::kMusic) {
                 audio_service_.ResetDecoder();
             }
-#endif
             break;
         case kDeviceStateWifiConfiguring:
-#if ENABLE_LOCAL_AUTO_STOP_LISTENING
-            StopAutoStopListeningTimer();
-#endif
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(false);
             break;
@@ -1080,23 +1010,6 @@ void Application::HandleStateChangedEvent() {
             break;
     }
 }
-
-#if ENABLE_LOCAL_AUTO_STOP_LISTENING
-void Application::StartAutoStopListeningTimer() {
-    if (auto_stop_listening_timer_handle_ == nullptr) {
-        return;
-    }
-    esp_timer_stop(auto_stop_listening_timer_handle_);
-    ESP_ERROR_CHECK(esp_timer_start_once(auto_stop_listening_timer_handle_, 4500 * 1000));
-}
-
-void Application::StopAutoStopListeningTimer() {
-    if (auto_stop_listening_timer_handle_ == nullptr) {
-        return;
-    }
-    esp_timer_stop(auto_stop_listening_timer_handle_);
-}
-#endif
 
 void Application::Schedule(std::function<void()>&& callback) {
     {

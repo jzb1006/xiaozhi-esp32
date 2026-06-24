@@ -38,8 +38,7 @@ enum AbortReason {
 enum ListeningMode {
     kListeningModeAutoStop,
     kListeningModeManualStop,
-    kListeningModeRealtime, // 需要 AEC 支持
-    kListeningModeBargeIn
+    kListeningModeRealtime // 需要 AEC 支持
 };
 
 enum ListenStopReason {

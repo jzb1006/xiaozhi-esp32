@@ -579,20 +579,21 @@ void AudioService::EnableWakeWordDetection(bool enable) {
     }
 }
 
-void AudioService::StartVoiceProcessing(bool reset_decoder) {
+void AudioService::EnableVoiceProcessing(bool enable) {
+    ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
+    if (!enable) {
+        audio_processor_->Stop();
+        xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        return;
+    }
+
     if (!audio_processor_initialized_) {
         audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
         audio_processor_initialized_ = true;
     }
 
-    if (!reset_decoder && IsAudioProcessorRunning()) {
-        return;
-    }
-
-    if (reset_decoder) {
-        /* We should make sure no audio is playing */
-        ResetDecoder();
-    }
+    /* We should make sure no audio is playing */
+    ResetDecoder();
     audio_input_need_warmup_ = true;
     // Reset input resampler to clear cached data from previous mode (e.g. WakeWord)
     // This prevents buffer overflow when switching between different feed sizes
@@ -604,21 +605,6 @@ void AudioService::StartVoiceProcessing(bool reset_decoder) {
     }
     audio_processor_->Start();
     xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
-}
-
-void AudioService::EnableVoiceProcessing(bool enable) {
-    ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
-    if (enable) {
-        StartVoiceProcessing(true);
-    } else {
-        audio_processor_->Stop();
-        xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
-    }
-}
-
-void AudioService::EnableVoiceProcessingForBargeIn() {
-    ESP_LOGD(TAG, "Enabling voice processing for barge-in");
-    StartVoiceProcessing(false);
 }
 
 void AudioService::EnableAudioTesting(bool enable) {

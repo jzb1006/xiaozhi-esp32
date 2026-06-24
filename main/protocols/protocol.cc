@@ -60,8 +60,7 @@ void Protocol::SendWakeWordDetected(const std::string& wake_word) {
 
 void Protocol::SendStartListening(ListeningMode mode) {
     const char* mode_text = mode == kListeningModeRealtime ? "realtime" :
-        mode == kListeningModeAutoStop ? "auto" :
-        mode == kListeningModeBargeIn ? "barge_in" : "manual";
+        mode == kListeningModeAutoStop ? "auto" : "manual";
     ESP_LOGI(TAG, "Send listen start, mode=%s", mode_text);
     std::string message = "{\"session_id\":\"" + session_id_ + "\"";
     message += ",\"type\":\"listen\",\"state\":\"start\",\"mode\":\"";
