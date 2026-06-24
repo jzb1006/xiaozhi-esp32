@@ -34,23 +34,28 @@
 #define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_40
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_39
 
-#define DISPLAY_SDA_PIN GPIO_NUM_41
-#define DISPLAY_SCL_PIN GPIO_NUM_42
-#define DISPLAY_WIDTH   128
+// GC9A01 1.28-inch 240x240 round SPI IPS display.
+// Wire BLC/BLK to 3V3 for always-on backlight, or assign a GPIO below.
+#define DISPLAY_BACKLIGHT_PIN           GPIO_NUM_NC
+#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
-#if CONFIG_OLED_SSD1306_128X32
-#define DISPLAY_HEIGHT  32
-#elif CONFIG_OLED_SSD1306_128X64
-#define DISPLAY_HEIGHT  64
-#elif CONFIG_OLED_SH1106_128X64
-#define DISPLAY_HEIGHT  64
-#define SH1106
-#else
-#error "OLED display type is not selected"
-#endif
+#define DISPLAY_MOSI_PIN GPIO_NUM_41
+#define DISPLAY_CLK_PIN  GPIO_NUM_42
+#define DISPLAY_DC_PIN   GPIO_NUM_21
+#define DISPLAY_CS_PIN   GPIO_NUM_38
+#define DISPLAY_RST_PIN  GPIO_NUM_17
 
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
+#define DISPLAY_WIDTH        240
+#define DISPLAY_HEIGHT       240
+#define DISPLAY_OFFSET_X     0
+#define DISPLAY_OFFSET_Y     0
+#define DISPLAY_MIRROR_X     true
+#define DISPLAY_MIRROR_Y     false
+#define DISPLAY_SWAP_XY      false
+#define DISPLAY_INVERT_COLOR true
+#define DISPLAY_RGB_ORDER    LCD_RGB_ELEMENT_ORDER_BGR
+#define DISPLAY_SPI_MODE     0
+#define DISPLAY_SPI_SCLK_HZ  (10 * 1000 * 1000)
 
 
 // A MCP Test: Control a lamp
