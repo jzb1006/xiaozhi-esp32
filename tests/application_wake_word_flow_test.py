@@ -79,8 +79,21 @@ def test_websocket_open_failure_drops_half_open_connection():
     assert "websocket_.reset()" in body
 
 
+def test_tts_finish_plays_completion_sound():
+    source = APPLICATION_CC.read_text()
+    body = extract_function_body(
+        source,
+        "void Application::FinishServerPlayback()",
+    )
+
+    assert "ServerPlaybackKind::kTts" in body
+    assert "!aborted_.load()" in body
+    assert "audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS)" in body
+
+
 if __name__ == "__main__":
     test_continue_wake_word_invoke_accepts_reused_open_channel()
     test_activation_done_opens_push_channel_without_listening()
     test_websocket_open_check_does_not_expire_idle_push_channel()
     test_websocket_open_failure_drops_half_open_connection()
+    test_tts_finish_plays_completion_sound()

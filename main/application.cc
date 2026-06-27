@@ -881,11 +881,17 @@ bool Application::PrepareServerPlayback(ServerPlaybackKind kind) {
 }
 
 void Application::FinishServerPlayback() {
+    const auto playback_kind = server_playback_kind_.load();
+    const bool play_finish_sound = playback_kind == ServerPlaybackKind::kTts && !aborted_.load();
+
     if (GetDeviceState() != kDeviceStateSpeaking) {
         EndServerPlayback();
         return;
     }
     EndServerPlayback();
+    if (play_finish_sound) {
+        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+    }
     if (listening_mode_ == kListeningModeManualStop) {
         SetDeviceState(kDeviceStateIdle);
     } else {
