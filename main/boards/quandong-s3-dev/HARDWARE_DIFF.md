@@ -11,11 +11,11 @@
 | 芯片 | ESP32-S3 | ESP32-S3 |
 | 基类 | `WifiBoard` | `WifiBoard` |
 | 音频 codec | **ES8311 硬 codec**（I2C 控制 + I2S 全双工） | **无 codec**：MEMS I2S 麦克 + I2S 数字功放（`NoAudioCodec`） |
-| 显示 | **ILI9341 240×320 SPI 彩屏** | **SSD1306 / SH1106 OLED 128×32 或 128×64**（I2C 单色） |
+| 显示 | **ILI9341 240×320 SPI 彩屏** | **GC9A01 1.28 寸 240×240 SPI 圆形 IPS 彩屏** |
 | 按键数 | 1（BOOT） | 4（BOOT、Touch、Vol+、Vol-） |
 | 板载 LED | 无 | GPIO48 单色 |
 | MCP 外设示例 | 无 | `LampController`（GPIO18） |
-| 背光 | PWM on GPIO45 | OLED 无背光 |
+| 背光 | PWM on GPIO45 | BLC / BLK 接 3V3 常亮 |
 | 字体 / emoji 资源 | `font_noto_basic_20_4` + `font_awesome_20_4` + `noto-emoji_128` | `font_puhui_basic_14_1` + `font_awesome_14_1`（无 emoji） |
 
 ---
@@ -49,7 +49,7 @@
 
 - **硬件 codec vs 纯 I2S**：ES8311 提供更稳定的 ADC/DAC、硬件音量、消除 PoP，bread-compact-wifi 依赖软件处理。
 - **采样率**：quandong 麦克按 24kHz 采，bread-compact-wifi 是 16kHz。两者都被 audio pipeline 重采样到协议层需要的速率。
-- **I2C 资源**：quandong 用 I2C0 控 ES8311；bread-compact-wifi 的 I2C0 用来挂 SSD1306。两块板的 I2C0 用途完全不同，引脚也完全不同。
+- **显示总线**：quandong 用 SPI2 驱动 ILI9341；bread-compact-wifi 用 SPI3 驱动 GC9A01。两块板的显示控制器、SPI host 和引脚都不同。
 
 ---
 
@@ -71,18 +71,18 @@
 
 | 项 | 值 |
 |---|---|
-| 屏型号 | **SSD1306**（默认）或 **SH1106**（由 Kconfig `DISPLAY_OLED_TYPE` 选择） |
-| 接口 | **I2C**（400 kHz），地址 `0x3C` |
-| 分辨率 | **128 × 32** 或 **128 × 64**（Kconfig 选择） |
-| 引脚 | SDA = GPIO41，SCL = GPIO42 |
-| 背光 | 无（OLED 自发光） |
-| 显示类 | `OledDisplay`（LVGL 9，1bit 单色） |
+| 屏型号 | **GC9A01** |
+| 接口 | **SPI**（SPI3，10 MHz） |
+| 分辨率 | **240 × 240** |
+| 引脚 | MOSI/SDA = GPIO41，SCLK/SCL = GPIO42，DC = GPIO21，CS = GPIO38，RST = GPIO17 |
+| 背光 | BLC / BLK 接 3V3 常亮 |
+| 显示类 | `SpiLcdDisplay`（RGB565） |
 
 ### 关键差异
 
-- **彩屏 vs 单色**：quandong 能跑 emoji、AI logo、大字体；bread-compact-wifi 只能塞下 1~2 行文字 + 简易图标。
-- **接口带宽**：SPI 40 MHz vs I2C 400 kHz，差两个数量级，影响画面刷新流畅度。
-- **驱动栈**：quandong 用 `esp_lcd_ili9341` (component 1.2.0) + `lvgl_port`；bread-compact-wifi 用 `esp_lcd_panel_ssd1306` / `esp_lcd_panel_sh1106`。
+- **分辨率 / 形态**：quandong 是 240×320 矩形屏；bread-compact-wifi 是 240×240 圆屏。
+- **接口带宽**：两者都走 SPI，quandong 当前配置 40 MHz，bread-compact-wifi 当前配置 10 MHz。
+- **驱动栈**：quandong 用 `esp_lcd_ili9341` (component 1.2.0) + `lvgl_port`；bread-compact-wifi 用 `esp_lcd_gc9a01` + `SpiLcdDisplay`。
 
 ---
 
@@ -130,8 +130,8 @@ GetBacklight()->SetBrightness(100)
 ### bread-compact-wifi 构造序列
 
 ```
-InitializeDisplayI2c()      // I2C0 for SSD1306
-InitializeSsd1306Display()  // OledDisplay
+InitializeSpi()             // SPI3 for GC9A01
+InitializeGc9a01Display()   // SpiLcdDisplay
 InitializeButtons()         // BOOT + Touch + Vol+ + Vol-
 InitializeTools()           // 注册 LampController（MCP 外设）
 ```
@@ -147,17 +147,17 @@ InitializeTools()           // 注册 LampController（MCP 外设）
 | quandong-s3-dev | `font_noto_basic_20_4` | `font_awesome_20_4` | `noto-emoji_128` |
 | bread-compact-wifi | `font_puhui_basic_14_1` | `font_awesome_14_1` | （无） |
 
-→ quandong 走的是和 `lichuang-dev`、`esp-box-3` 等 240×320 LCD 板同档资源；OLED 板因为像素少，用 14 像素位图字体即可，emoji 也加载不动。
+→ quandong 走的是和 `lichuang-dev`、`esp-box-3` 等 240×320 LCD 板同档资源；bread-compact-wifi 当前虽已接入 240×240 GC9A01 圆屏，但字体和 emoji 资源仍沿用轻量配置。
 
 ### 其它依赖
 
 - quandong 需要 `espressif/esp_lcd_ili9341 ==1.2.0`（仓库 `main/idf_component.yml` 已有，无需补依赖）
-- bread-compact-wifi 不需要额外组件，`esp_lcd_panel_ssd1306` 走 ESP-IDF 自带的 driver
+- bread-compact-wifi 使用 `esp_lcd_gc9a01`
 
 ---
 
 ## 7. 一句话总结
 
 > **quandong-s3-dev** ≈ "彩屏 + 硬 codec + 单按键" 的工程开发板，UI 表现力强但交互简化。
-> **bread-compact-wifi** ≈ "OLED + 纯 I2S 软 codec + 多按键 + 板载 lamp" 的面包板参考实现，便于上手 MCP 外设。
+> **bread-compact-wifi** ≈ "GC9A01 圆屏 + 纯 I2S 软 codec + 多按键 + 板载 lamp" 的面包板参考实现，便于上手 MCP 外设。
 > 功能层（配网、语音通话、MCP、唤醒）由 `WifiBoard` 基类统一提供，两者表现一致。

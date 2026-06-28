@@ -3,9 +3,10 @@
 本板型的关键构建配置写在同目录的 `config.json` 中，包括：
 
 - `CONFIG_OTA_URL="http://203.195.202.54:8766/api/ota/check"`
-- `CONFIG_OLED_SSD1306_128X32=y`
 
 请不要直接使用裸命令 `idf.py set-target esp32s3 && idf.py build` 作为标准构建流程。裸 `idf.py build` 不会自动读取本目录的 `config.json`，容易漏掉 OTA 服务器地址等板型追加配置。
+
+屏幕硬件参数写在同目录的 `config.h` 中。当前实物屏幕为 `GC9A01` 1.28 寸 240x240 SPI 圆形 IPS 屏，不再使用 SSD1306 OLED 构建变体。
 
 ## 环境准备
 
@@ -67,12 +68,14 @@ python -m esptool --chip esp32s3 -p <PORT> -b 460800 --before default_reset --af
 
 ```powershell
 Select-String sdkconfig -Pattern "CONFIG_OTA_URL|CONFIG_SR_WN_WN9_|CONFIG_USE_CUSTOM_WAKE_WORD"
+Select-String main\boards\bread-compact-wifi\config.h -Pattern "GC9A01|DISPLAY_WIDTH|DISPLAY_HEIGHT|DISPLAY_MOSI_PIN|DISPLAY_CLK_PIN|DISPLAY_DC_PIN|DISPLAY_CS_PIN|DISPLAY_RST_PIN"
 rg -a "203.195.202.54|api.tenclass|XIAOBINXIAOBIN" build\xiaozhi.bin
 ```
 
 期望结果：
 
 - `CONFIG_OTA_URL` 指向 `http://203.195.202.54:8766/api/ota/check`
+- `config.h` 中屏幕为 `GC9A01`，分辨率为 240x240，SPI 接线为 SDA/MOSI=GPIO41、SCL/CLK=GPIO42、DC=GPIO21、CS=GPIO38、RES/RST=GPIO17
 - 不应出现官方默认 `api.tenclass` 地址
 - 默认唤醒词应为 `CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=y`
 - `CONFIG_USE_CUSTOM_WAKE_WORD` 不应启用，除非明确要构建自定义唤醒词版本
