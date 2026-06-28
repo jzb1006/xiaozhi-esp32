@@ -19,6 +19,10 @@
 #define TAG "Assets"
 #define PARTITION_LABEL "assets"
 
+#if HAVE_LVGL && CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+#define BREAD_COMPACT_WIFI_NEUTRAL_EMOJI "ai_robo_idle_128.gif"
+#endif
+
 struct mmap_assets_table {
     char asset_name[32];          /*!< Name of the asset */
     uint32_t asset_size;          /*!< Size of the asset */
@@ -285,6 +289,18 @@ bool Assets::LvglStrategy::Apply(Assets* assets, bool refresh_display_theme) {
             dark_theme->set_emoji_collection(custom_emoji_collection);
         }
     }
+
+#if HAVE_LVGL && CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    if (assets->GetAssetData(BREAD_COMPACT_WIFI_NEUTRAL_EMOJI, ptr, size)) {
+        for (auto theme : {light_theme, dark_theme}) {
+            if (theme == nullptr || theme->emoji_collection() == nullptr) {
+                continue;
+            }
+            theme->emoji_collection()->AddEmoji("neutral", new LvglRawImage(ptr, size));
+        }
+        ESP_LOGI(TAG, "Loaded bread compact WiFi neutral emoji: %s", BREAD_COMPACT_WIFI_NEUTRAL_EMOJI);
+    }
+#endif
 
     cJSON* skin = cJSON_GetObjectItem(root, "skin");
     if (cJSON_IsObject(skin)) {
